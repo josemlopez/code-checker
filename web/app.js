@@ -33,6 +33,7 @@ async function poll(jobId, text) {
     await new Promise(resolve=>setTimeout(resolve,1200));
   }
 }
+function modelsOn(){return state.config?.models_enabled!==false;}
 function nodeColor(node) { return node.assessment && !node.assessment.stale ? node.assessment.color : 'gray'; }
 const diffLabels={added:'Añadido',modified:'Modificado',deleted:'Eliminado',unknown:'Sin analizar · datos anteriores',contains:'Contiene cambios',impact:'Impacto potencial',impact_path:'Ruta a impacto',context:'Contexto del consumidor'};
 function inDiff(n){return !state.project?.comparison||state.diffVisible?.has(n.id);}
@@ -109,7 +110,7 @@ async function applyDiff(){
 function leaveDiff(){
   state.diffRequest=(state.diffRequest||0)+1;$('diff-refresh').disabled=false;
   $('diff-summary').classList.add('hidden');$('diff-files').classList.add('hidden');
-  $('evaluate-map').disabled=false;$('export-btn').disabled=false;$('coverage-btn').disabled=false;$('run-btn').disabled=false;
+  $('evaluate-map').disabled=state.config?.models_enabled===false;$('export-btn').disabled=false;$('coverage-btn').disabled=false;$('run-btn').disabled=false;
   if(state.fullProject){state.project=state.fullProject;state.fullProject=null;state.diffJobId=null;state.diffVisible=null;state.level=null;state.scope='';state.page=0;state.selected=null;state.detail=null;renderScopes();renderStats();renderTree();renderGraph(true);$('inspector').innerHTML='<div class="inspector-placeholder"><h3>Proyecto completo</h3><p>Selecciona un componente.</p></div>';$('origin-note').textContent='Índice del proyecto actual · lectura estática. Pulsa ↻ para actualizarlo.';}
   scheduleLazy();
 }
@@ -376,7 +377,7 @@ async function processLazy(){
   if(state.lazyRunning)return;
   state.lazyRunning=true;state.lazyFailures??=new Set();
   try{
-    while(state.project?.origin?.kind==='ssh'&&!$('diff-only').checked&&!state.project.needs_rescan&&state.view==='architecture'&&$('lazy-enabled').checked){
+    while(modelsOn()&&state.project?.origin?.kind==='ssh'&&!$('diff-only').checked&&!state.project.needs_rescan&&state.view==='architecture'&&$('lazy-enabled').checked){
       const pid=state.project.id,fp=state.project.fingerprint,chosen={...profile};
       const key=id=>[pid,fp,chosen.provider,chosen.model,id].join('|');
       const n=(state.visibleModules||[]).map(id=>state.project.nodes.find(n=>n.id===id)).find(n=>n&&!validLazy(n)&&!state.busy.has(n.id)&&!state.lazyFailures.has(key(n.id)));
@@ -504,6 +505,7 @@ function renderChat(){const n=state.detail;const messages=state.conversations[st
 
 async function runEvaluation(question='') {
   if(state.project?.comparison){toast('La vista diff es estática. Vuelve al proyecto actual para evaluar con el modelo.');return;}
+  if(!modelsOn()){toast('La evaluación con modelos está desactivada en este servidor.');return;}
   if(!state.detail)return;
   const projectId=state.project.id,id=state.detail.id;
   if(state.busy.has(id)){toast('Este componente ya tiene una consulta en curso.');return;}
@@ -522,6 +524,7 @@ async function showContext(){if(!state.detail)return;const ctx=await api(`/proje
 
 async function evaluateMap() {
   if(state.project?.comparison)return;
+  if(!modelsOn()){toast('La evaluación con modelos está desactivada en este servidor.');return;}
   if(!state.project){toast('Abre primero un proyecto.');return;}
   if(state.batch){toast('La evaluación del mapa ya está en curso.');return;}
   const projectId=state.project.id;
@@ -539,7 +542,7 @@ async function evaluateMap() {
       } finally {state.busy.delete(id);}
     }
     toast(`${ids.length} módulos evaluados. Los colores proceden del modelo.`);
-  } finally {state.batch=false;$('evaluate-map').disabled=false;$('evaluate-map').textContent='✦ Evaluar mapa';renderInspector();}
+  } finally {state.batch=false;$('evaluate-map').disabled=!modelsOn();$('evaluate-map').textContent='✦ Evaluar mapa';renderInspector();}
 }
 
 function renderEvidence() {
@@ -554,7 +557,8 @@ function renderEvidence() {
   $('evidence-content').innerHTML=html;
 }
 function renderHistory(){if(!state.project)return;const p=state.project;const rows=[{at:p.created_at,title:'Proyecto analizado',detail:`${p.files.length} archivos · huella ${p.fingerprint.slice(0,12)}`},...p.nodes.filter(n=>n.assessment).map(n=>({at:n.assessment.at,title:`Evaluación: ${n.name}`,detail:`${n.assessment.provider} · ${n.assessment.model} · ${n.assessment.stale?'desactualizada':'predictiva'} · ${labels[n.assessment.color]}`})),...p.history.map(h=>({at:h.at,title:'Proyecto vuelto a analizar',detail:h.changed?'Cambios detectados. Evaluaciones anteriores marcadas como desactualizadas.':'Misma huella del código y la documentación.'}))].sort((a,b)=>b.at.localeCompare(a.at));$('history-content').innerHTML=rows.map(r=>`<div class="timeline-row"><span>◉</span><div><strong>${esc(r.title)}</strong><p>${esc(r.detail)}</p></div><time>${date(r.at)}</time></div>`).join('');}
-function renderProfile(){ $('profile-label').innerHTML=`${esc(profile.provider==='codex'?'Codex CLI':'Ollama')}<small>${esc(profile.model||'Modelo predeterminado')}</small>`; }
+function renderProfile(){ $('profile-label').innerHTML=modelsOn()?`${esc(profile.provider==='codex'?'Codex CLI':'Ollama')}<small>${esc(profile.model||'Modelo predeterminado')}</small>`:'Modelos desactivados<small>Solo análisis estático</small>'; }
+function applyModelSwitch(){if(modelsOn())return;$('lazy-enabled').checked=false;$('lazy-enabled').disabled=true;$('evaluate-map').disabled=true;$('lazy-status').textContent='Modelos desactivados en este servidor · solo análisis estático';}
 function providerInfo(){const local=$('provider').value==='ollama';$('endpoint-label').classList.toggle('hidden',!local);$('model').placeholder=local?'Nombre del modelo instalado':'Vacío = predeterminado del CLI';$('provider-info').textContent=local?'Ollama recibe el contexto en este ordenador. Usa un modelo instalado que admita salida JSON estructurada.':`Codex CLI ${state.config.codex_available?'detectado':'no detectado'}. Utiliza tu sesión de Codex; el código y los fragmentos de documentación del paquete se envían a su proveedor al pulsar Evaluar o Preguntar. El proceso trabaja en modo de solo lectura.`;}
 function openSettings(){$('provider').value=profile.provider;$('model').value=profile.model;$('endpoint').value=profile.endpoint;providerInfo();$('settings-dialog').showModal();}
 function openRun(){if(!state.project){toast('Abre primero un proyecto.');return;}$('run-component').innerHTML=state.project.nodes.map(n=>`<option value="${esc(n.id)}">${esc(n.qualified_name)}</option>`).join('');$('run-component').value=state.selected;$('run-profile').value=(profile.provider+' '+profile.model).trim();$('run-dialog').showModal();}
@@ -586,7 +590,7 @@ bind('diff-impact','change',updateDiffFilter);
 bind('diff-pr-load','click',loadPullRequests);bind('diff-pr-state','change',loadPullRequests);
 bind('diff-pr','change',()=>{$('diff-pr-number').value='';describePR();if($('diff-only').checked)return applyDiff();});
 bind('diff-pr-number','input',()=>{$('diff-pr').value='';describePR();});
-bind('diff-mode','change',async()=>{
+async function syncDiffMode(){
   const mode=$('diff-mode').value,working=mode==='working',pr=mode==='pr';
   $('diff-head-field').classList.toggle('hidden',working||pr);$('diff-base-field').classList.toggle('hidden',pr);
   $('diff-pr-fields').classList.toggle('hidden',!pr);$('diff-refs').classList.toggle('hidden',pr);
@@ -594,7 +598,27 @@ bind('diff-mode','change',async()=>{
   if(working)$('diff-base').value='HEAD';
   else if($('diff-base').value==='HEAD')$('diff-base').value=(state.gitRefs||[]).find(r=>['main','origin/main','master','origin/master'].includes(r))||'';
   if(pr)await loadPullRequests();
-});
+}
+bind('diff-mode','change',syncDiffMode);
+// Deep link: /?project=<abs path>&pr=<n>&diff=1&impact=1 or &base=<ref>&rev=<ref>.
+// The server validates every parameter (allowlisted roots); the UI then runs the normal flow.
+async function openDeepLink(query){
+  const link=await api('/deep-link'+query);
+  if(link.project_id){try{await loadProject(link.project_id);}catch{link.project_id=null;}}
+  if(!link.project_id)await scan(link.path);
+  if(!link.mode)return;
+  $('diff-mode').value=link.mode;
+  await syncDiffMode();
+  if(link.mode==='branches'){$('diff-base').value=link.base;$('diff-head').value=link.rev;}
+  if(link.mode==='pr'){
+    // Set after the PR list loads: loading the list clears the number field.
+    const listed=(state.pullRequests||[]).some(p=>p.number===link.pr);
+    $('diff-pr').value=listed?String(link.pr):'';$('diff-pr-number').value=listed?'':String(link.pr);describePR();
+    if(!listed)$('diff-pr-info').textContent=`PR #${link.pr} (enlace directo). Se leerán sus commits sin modificar el repositorio.`;
+  }
+  $('diff-impact').checked=link.impact;
+  if(link.diff)await applyDiff();
+}
 bind('code-smaller','click',()=>resizeCode(-1));bind('code-larger','click',()=>resizeCode(1));
 bind('code-wrap','change',e=>$('code-expanded').classList.toggle('wrap-code',e.target.checked));
 bind('evaluate-map','click',evaluateMap);
@@ -616,7 +640,7 @@ $('graph').addEventListener('pointerdown',e=>{if(e.target.closest('[data-node],[
 $('graph').addEventListener('pointermove',e=>{if(!drag)return;const rect=$('graph').getBoundingClientRect();state.graph.x=drag.gx+(e.clientX-drag.x)*900/rect.width;state.graph.y=drag.gy+(e.clientY-drag.y)*600/rect.height;transformGraph();});
 $('graph').addEventListener('pointerup',()=>drag=null);
 $('graph').addEventListener('pointercancel',()=>drag=null);
-(async()=>{state.config=await api('/config');renderProfile();const saved=localStorage.getItem('checker-project');if(saved){try{await loadProject(saved);}catch{localStorage.removeItem('checker-project');}}})().catch(catchError);
+(async()=>{state.config=await api('/config');renderProfile();applyModelSwitch();if(location.search.length>1){await openDeepLink(location.search);return;}const saved=localStorage.getItem('checker-project');if(saved){try{await loadProject(saved);}catch{localStorage.removeItem('checker-project');}}})().catch(catchError);
 setInterval(async()=>{
   if(!state.project||$('diff-only').checked||state.busy.size||state.batch||state.refreshing)return;
   const projectId=state.project.id;

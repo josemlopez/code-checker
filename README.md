@@ -184,6 +184,23 @@ Dentro de un script, el mapa muestra un marco con la ruta del archivo y sus comp
 
 El grafo de llamadas es parcial: respeta ámbitos léxicos, separa cuerpos anidados y descarta parámetros, imports o asignaciones que ocultan un nombre. No resuelve atributos (`self.metodo()` incluido), alias, despacho dinámico, lambda, decoradores ni argumentos por defecto. Una flecha indica una referencia de llamada estática, no ejecución observada. El índice se calcula por SSH en memoria y no requiere CLI ni cambios en el repositorio analizado.
 
+## Enlaces directos
+
+Un enlace puede abrir un proyecto local y su comparación sin clics:
+
+```text
+http://127.0.0.1:8873/?project=/srv/projects/my-python-app&pr=465&diff=1&impact=1
+http://127.0.0.1:8873/?project=/srv/projects/my-python-app&base=main&rev=feature-x&diff=1
+```
+
+- `project`: ruta absoluta de una carpeta existente dentro de un repositorio Git. Solo se aceptan carpetas bajo las raíces de `CODE_CHECKER_DEEP_LINK_ROOTS` (rutas absolutas separadas por `:` en Linux/macOS o `;` en Windows). Sin esa variable los enlaces directos están desactivados.
+- `pr`: número entero positivo de un PR de GitHub (mismo flujo que el selector, vía `gh`). Alternativa: `base` y `rev` para **Comparar ramas**; nombres de rama, etiqueta o commit, sin opciones ni sintaxis de revisión.
+- `diff` (`0`/`1`, por defecto `1` si hay comparación) activa **Ver solo el diff**; `impact` (`0`/`1`, por defecto `0`) activa **Incluir impacto potencial**.
+
+El servidor valida cada parámetro y rechaza parámetros desconocidos o repetidos. Si el proyecto ya tiene índice local se reutiliza; si no, se analiza de forma estática como al abrirlo. No se ejecuta código del proyecto.
+
+`CODE_CHECKER_MODELS=off` desactiva en el servidor cualquier llamada a modelos (evaluar, consultar y evaluación lazy); el análisis estático y el diff siguen disponibles.
+
 ## Filtro Git: ver solo el diff
 
 Activa **Ver solo el diff** para conservar únicamente los componentes cambiados y los paquetes, scripts y clases necesarios para llegar hasta ellos. Funciona en todos los niveles, incluido el marco del script. Las etiquetas Añadido, Modificado, Eliminado y Contiene cambios son estados de Git/análisis, separados de la evaluación del modelo. Un desplazamiento de líneas no marca funciones intactas; los cambios en decoradores sí cuentan. Los eliminados permiten consultar el código y las métricas anteriores. Los archivos no Python, fuera de alcance o no analizables permanecen en el inventario desplegable; los errores de parseo no se presentan como eliminaciones confirmadas.

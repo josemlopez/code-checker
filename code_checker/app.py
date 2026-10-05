@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import threading
 import uuid
@@ -13,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import store, remote, git_diff
+from . import store, remote, git_diff, deep_link
 from .analyzer import VERSION, analyze, attach_coverage, digest, disk_stamp, now
 from .evaluation import POLICY_VERSION, codex_command, evaluate, package_for, profile_key
 
@@ -24,6 +25,8 @@ TOKEN = secrets.token_urlsafe(32)
 JOBS = {}
 JOB_LOCK = threading.RLock()
 MODEL_LOCK = threading.Lock()
+# CODE_CHECKER_MODELS=off disables every model call (evaluate, ask, lazy) on this server.
+MODELS_ENABLED = os.environ.get('CODE_CHECKER_MODELS', 'on').strip().lower() not in {'off', '0', 'false', 'no'}
 
 
 @app.middleware("http")
@@ -125,8 +128,24 @@ def launch_job(kind, worker):
 @app.get("/api/config")
 def config():
     return {"token": TOKEN, "version": "1.0.0", "policy_version": POLICY_VERSION,
-            "codex_available": codex_command() is not None, "example_path": str(BASE / "examples" / "dispatch"),
+            "codex_available": MODELS_ENABLED and codex_command() is not None, "models_enabled": MODELS_ENABLED, "example_path": str(BASE / "examples" / "dispatch"),
             "self_path": str(BASE / "code_checker"), "data_path": str(store.DATA)}
+
+
+@app.get("/api/deep-link")
+def deep_link_target(request: Request):
+    try:
+        target = deep_link.parse(request.query_params.multi_items())
+    except deep_link.Forbidden as exc:
+        raise HTTPException(403, str(exc)) from None
+    # Reuse an existing local index of that folder; otherwise the UI scans it statically.
+    try:
+        known = store.get(target['project_id'])
+        if remote.is_remote(known) or known.get('root') != target['path']:
+            target['project_id'] = None
+    except KeyError:
+        target['project_id'] = None
+    return target
 
 
 @app.get("/api/projects")
@@ -230,6 +249,8 @@ def context(project_id: str, id: str):
 
 @app.post("/api/projects/{project_id}/evaluate")
 def assessment(project_id: str, body: ModelRequest):
+    if not MODELS_ENABLED:
+        raise HTTPException(403, "La evaluación con modelos está desactivada en este servidor (CODE_CHECKER_MODELS=off).")
     project = store.get(project_id)
     if project.get('analyzer_version') != VERSION or current_stamp(project) != project.get("disk_stamp"):
         raise ValueError("El proyecto ha cambiado en disco. Vuelve a analizar antes de evaluar.")
