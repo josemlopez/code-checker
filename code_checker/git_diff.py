@@ -179,7 +179,7 @@ def node_signatures(project):
     """Include decorators, preserve comment changes, ignore unrelated line shifts."""
     result = {}
     for module in (n for n in project['nodes'] if n['kind'] == 'module'):
-        source = module['source'];lines = source.splitlines()
+        source = module['source'];lines = a.source_lines(source)
         syntax = ast.parse(source)
         starts = {(n.lineno,n.name):min([n.lineno]+[d.lineno for d in n.decorator_list])
                   for n in ast.walk(syntax) if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef))}

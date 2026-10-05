@@ -5,17 +5,31 @@ import ast
 import hashlib
 import json
 import os
+import re
 import tokenize
 from datetime import datetime, timezone
 from pathlib import Path
 
 from radon.complexity import cc_visit
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 IGNORED = {".git", ".venv", "venv", "env", "node_modules", "__pycache__", ".codechecker", ".pytest_cache", ".mypy_cache", "site-packages", "dist", "build"}
 MAX_FILES = 1500
 MAX_FILE_BYTES = 500_000
 MAX_TOTAL_BYTES = 20_000_000
+LINE_BREAK = re.compile(r'\r\n|\r|\n')
+
+
+def source_lines(source):
+    """Split lines as Python's tokenizer and AST line numbers do (\\n, \\r\\n, \\r).
+
+    str.splitlines also breaks on \\x0c, \\x1c-\\x1e, \\x85, \\u2028 and \\u2029, which may
+    appear inside string literals; that shifts AST line numbers and corrupts fragments.
+    """
+    lines = LINE_BREAK.split(source)
+    if lines and lines[-1] == '':
+        lines.pop()
+    return lines
 
 
 def digest(value):
@@ -121,7 +135,7 @@ def disk_stamp(root_path, scope=None):
 def components_for(path, relative, source, tree):
     mod = module_name(relative)
     module_id = relative
-    lines = source.splitlines()
+    lines = source_lines(source)
     cc = {}
 
     def collect_cc(blocks):

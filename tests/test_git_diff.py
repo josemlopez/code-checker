@@ -192,3 +192,20 @@ def test_pr_api_reads_remote_list_and_dispatches_selected_number(tmp_path,monkey
             time.sleep(.01)
         assert job['status']=='completed',job
         assert calls[-1]==('pr_diff',{'number':42})
+
+
+def test_unicode_line_separators_inside_strings_keep_lines_and_signatures(repo):
+    # str.splitlines() would break inside these literals; Python and Git do not.
+    odd = 'SEPARATORS = ["\x85", " ", "\x0c", "\x1c"]\n'
+    write(repo,'src/odd.py',odd+'def after():\n    return 1\n')
+    run(repo,'add','.');run(repo,'commit','-m','odd separators')
+    base=run(repo,'rev-parse','HEAD')
+    write(repo,'src/odd.py',odd+'def after():\n    return 2\n')
+    run(repo,'add','.');run(repo,'commit','-m','change after')
+    diff=compare(repo,base,run(repo,'rev-parse','HEAD'),'direct')
+    nodes={n['id']:n for n in diff['nodes']}
+    assert nodes['src/odd.py::after']['diff_status']=='modified'
+    assert (nodes['src/odd.py::after']['line'],nodes['src/odd.py::after']['end_line'])==(2,3)
+    assert 'src/odd.py::SEPARATORS' not in nodes or nodes['src/odd.py::SEPARATORS'].get('diff_status') is None
+    current=component(repo,diff['comparison']['head_sha'],nodes['src/odd.py::after'])
+    assert current['source']=='def after():\n    return 2'
